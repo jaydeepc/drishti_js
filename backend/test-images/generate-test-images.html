@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate Test Images</title>
+</head>
+<body>
+    <canvas id="canvas1" width="200" height="200"></canvas>
+    <canvas id="canvas2" width="200" height="200"></canvas>
+    <script>
+        // Function to draw a simple face
+        function drawFace(canvasId, color) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            
+            // Clear canvas
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, 200, 200);
+            
+            // Draw face circle
+            ctx.beginPath();
+            ctx.arc(100, 100, 70, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+            
+            // Draw eyes
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.arc(70, 80, 10, 0, Math.PI * 2);
+            ctx.arc(130, 80, 10, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Draw smile
+            ctx.beginPath();
+            ctx.arc(100, 110, 30, 0, Math.PI);
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
+
+        // Draw faces
+        drawFace('canvas1', '#ffdbac');
+        drawFace('canvas2', '#ffdbac');
+
+        // Convert to images
+        setTimeout(() => {
+            const links = document.createElement('div');
+            document.body.appendChild(links);
+
+            ['canvas1', 'canvas2'].forEach(id => {
+                const canvas = document.getElementById(id);
+                const link = document.createElement('a');
+                link.download = `${id}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.textContent = `Download ${id}.png`;
+                link.style.display = 'block';
+                link.style.margin = '10px';
+                links.appendChild(link);
+            });
+        }, 100);
+    </script>
+</body>
+</html>
