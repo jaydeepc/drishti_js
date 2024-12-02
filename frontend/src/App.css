@@ -141,11 +141,6 @@ button[type="submit"].loading {
   border-radius: 3px;
 }
 
-.image-with-box {
-  width: 100%;
-  margin-bottom: 10px;
-}
-
 .confidence-meter {
   height: 20px;
   background-color: #e9ecef;
@@ -160,17 +155,38 @@ button[type="submit"].loading {
   transition: width 0.3s ease, background-color 0.3s ease;
 }
 
-.confidence-text {
-  font-size: 1.2em;
-  font-weight: bold;
+.metrics {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin: 15px 0;
+  padding: 10px;
+  background-color: white;
+  border-radius: 5px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.confidence-text {
+  font-size: 1.1em;
+  font-weight: bold;
   color: #333;
+  margin: 0;
+}
+
+.distance-text {
+  font-size: 1.1em;
+  color: #666;
+  margin: 0;
 }
 
 .match-message {
-  font-size: 1.1em;
-  margin: 10px 0;
-  color: #495057;
+  font-size: 1.2em;
+  font-weight: bold;
+  margin: 15px 0;
+  padding: 10px;
+  border-radius: 5px;
+  text-align: center;
+  background-color: white;
 }
 
 .analysis-section {
@@ -189,16 +205,8 @@ button[type="submit"].loading {
 
 .analysis-text {
   color: #495057;
-  line-height: 1.5;
-  margin-bottom: 15px;
-}
-
-.threshold-info {
-  color: #6c757d;
-  font-size: 0.9em;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid #dee2e6;
+  line-height: 1.6;
+  margin: 0;
 }
 
 .error {
@@ -225,15 +233,17 @@ button[type="submit"].loading {
     grid-template-columns: 1fr;
   }
 
+  .metrics {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .confidence-text,
+  .distance-text {
+    margin: 5px 0;
+  }
+
   .face-container {
     margin-bottom: 15px;
-  }
-
-  .confidence-text {
-    font-size: 1.1em;
-  }
-
-  .analysis-section {
-    padding: 15px;
   }
 }

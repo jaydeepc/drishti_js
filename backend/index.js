@@ -75,42 +75,6 @@ async function loadModels() {
     }
 }
 
-async function alignFace(img, detection) {
-    const landmarks = detection.landmarks;
-    const leftEye = landmarks.getLeftEye();
-    const rightEye = landmarks.getRightEye();
-
-    // Calculate eye center points
-    const leftEyeCenter = {
-        x: leftEye.reduce((sum, point) => sum + point.x, 0) / leftEye.length,
-        y: leftEye.reduce((sum, point) => sum + point.y, 0) / leftEye.length
-    };
-    const rightEyeCenter = {
-        x: rightEye.reduce((sum, point) => sum + point.x, 0) / rightEye.length,
-        y: rightEye.reduce((sum, point) => sum + point.y, 0) / rightEye.length
-    };
-
-    // Calculate angle for alignment
-    const angle = Math.atan2(
-        rightEyeCenter.y - leftEyeCenter.y,
-        rightEyeCenter.x - leftEyeCenter.x
-    );
-
-    // Create canvas for aligned face
-    const alignedCanvas = new Canvas(img.width, img.height);
-    const ctx = alignedCanvas.getContext('2d');
-
-    // Translate and rotate
-    ctx.translate(img.width/2, img.height/2);
-    ctx.rotate(-angle);
-    ctx.translate(-img.width/2, -img.height/2);
-
-    // Draw aligned image
-    ctx.drawImage(img, 0, 0);
-
-    return alignedCanvas;
-}
-
 async function detectFaceAndExtract(imagePath, isIDCard = false) {
     try {
         const img = await canvas.loadImage(imagePath);
@@ -130,20 +94,8 @@ async function detectFaceAndExtract(imagePath, isIDCard = false) {
             throw new Error(`No face detected in the ${isIDCard ? 'ID card' : 'photo'}`);
         }
 
-        // Align face using landmarks
-        const alignedFace = await alignFace(img, fullDetection);
-
-        // Re-detect face features on aligned image for better accuracy
-        const alignedDetection = await faceapi.detectSingleFace(alignedFace, options)
-            .withFaceLandmarks()
-            .withFaceDescriptor();
-
-        if (!alignedDetection) {
-            throw new Error(`Could not detect face features in aligned ${isIDCard ? 'ID card' : 'photo'}`);
-        }
-
         // Extract face with margin
-        const box = alignedDetection.detection.box;
+        const box = fullDetection.detection.box;
         const margin = Math.floor(Math.max(box.width, box.height) * 0.25);
 
         // Create canvas for extraction
@@ -155,7 +107,7 @@ async function detectFaceAndExtract(imagePath, isIDCard = false) {
 
         // Draw the face region with margin
         ctx.drawImage(
-            alignedFace,
+            img,
             Math.max(0, box.x - margin),
             Math.max(0, box.y - margin),
             box.width + (margin * 2),
@@ -173,7 +125,7 @@ async function detectFaceAndExtract(imagePath, isIDCard = false) {
         fs.writeFileSync(extractedFilePath, buffer);
 
         return {
-            detection: alignedDetection,
+            detection: fullDetection,
             extractedFilePath: extractedFileName,
             box: {
                 x: box.x,
@@ -190,119 +142,78 @@ async function detectFaceAndExtract(imagePath, isIDCard = false) {
 
 function analyzeSimilarity(detection1, detection2) {
     try {
-        // Create labeled descriptors for better matching
-        const labeledDescriptors = [
-            new faceapi.LabeledFaceDescriptors(
-                'reference',
-                [detection1.descriptor]
-            )
-        ];
+        // Calculate Euclidean distance between face descriptors
+        const distance = faceapi.euclideanDistance(
+            detection1.descriptor,
+            detection2.descriptor
+        );
 
-        // Create face matcher with custom distance threshold
-        const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
+        // In face-api.js:
+        // - distance < 0.4: Very high confidence match
+        // - distance < 0.5: High confidence match
+        // - distance < 0.6: Possible match
         
-        // Find best match
-        const bestMatch = faceMatcher.findBestMatch(detection2.descriptor);
-        const distance = bestMatch.distance;
+        // Convert distance to confidence percentage (for UI purposes)
+        const confidence = Math.max(0, Math.min(100, (1 - distance) * 100));
         
-        // Calculate base similarity
-        let similarity = (1 - distance) * 100;
+        // Generate analysis based on distance
+        const analysis = [];
         
-        // Analyze facial landmarks for structural similarity
+        if (distance < 0.4) {
+            analysis.push("Very high confidence match - facial features align strongly");
+        } else if (distance < 0.5) {
+            analysis.push("High confidence match with some minor variations");
+        } else if (distance < 0.6) {
+            analysis.push("Possible match but with significant variations");
+        } else {
+            analysis.push("Faces appear to be different");
+        }
+
+        // Add analysis of specific facial features
         const landmarks1 = detection1.landmarks;
         const landmarks2 = detection2.landmarks;
         
         // Compare eye positions
-        const leftEyeMatch = compareFeaturePoints(
-            landmarks1.getLeftEye(),
-            landmarks2.getLeftEye()
+        const eyeDistance1 = faceapi.euclideanDistance(
+            landmarks1.getLeftEye()[0],
+            landmarks1.getRightEye()[0]
+        );
+        const eyeDistance2 = faceapi.euclideanDistance(
+            landmarks2.getLeftEye()[0],
+            landmarks2.getRightEye()[0]
         );
         
-        const rightEyeMatch = compareFeaturePoints(
-            landmarks1.getRightEye(),
-            landmarks2.getRightEye()
-        );
+        const eyeRatio = Math.min(eyeDistance1, eyeDistance2) / Math.max(eyeDistance1, eyeDistance2);
+        
+        if (eyeRatio > 0.9) {
+            analysis.push("Eye spacing shows strong similarity");
+        }
         
         // Compare nose structure
-        const noseMatch = compareFeaturePoints(
-            landmarks1.getNose(),
-            landmarks2.getNose()
-        );
+        const noseBridge1 = landmarks1.getNose().slice(0, 4);
+        const noseBridge2 = landmarks2.getNose().slice(0, 4);
+        const noseDistance = faceapi.euclideanDistance(noseBridge1[0], noseBridge2[0]);
         
-        // Compare mouth structure
-        const mouthMatch = compareFeaturePoints(
-            landmarks1.getMouth(),
-            landmarks2.getMouth()
-        );
-        
-        // Calculate feature match scores
-        const featureMatchScore = (
-            leftEyeMatch + rightEyeMatch + noseMatch + mouthMatch
-        ) / 4;
-        
-        // Boost similarity based on feature matches
-        similarity = similarity * (1 + featureMatchScore * 0.2);
-        
-        // Cap at 100
-        similarity = Math.min(100, similarity);
-        
-        // Generate detailed analysis
-        const analysis = [];
-        
-        if (distance < 0.4) {
-            analysis.push("Very high confidence match based on facial features");
-        } else if (distance < 0.5) {
-            analysis.push("Good confidence match with some variations");
-        } else if (distance < 0.6) {
-            analysis.push("Possible match with notable variations");
+        if (noseDistance < 0.2) {
+            analysis.push("Nose structure indicates a match");
         }
         
-        if (featureMatchScore > 0.8) {
-            analysis.push("Strong structural similarity in facial features");
+        if (distance >= 0.4) {
+            analysis.push("Differences may be due to age, facial hair, glasses, or image quality");
         }
         
-        if (leftEyeMatch > 0.8 && rightEyeMatch > 0.8) {
-            analysis.push("Eye regions show strong correspondence");
-        }
-        
-        if (noseMatch > 0.8) {
-            analysis.push("Nose structure shows high similarity");
-        }
-        
-        if (mouthMatch > 0.8) {
-            analysis.push("Mouth region indicates a match");
-        }
-        
-        if (distance > 0.45) {
-            analysis.push("Variations likely due to aging, expression, or image conditions");
-        }
+        // Determine match based on distance threshold
+        const match = distance < 0.4; // Using 0.4 as the strict threshold for matching
         
         return {
-            similarity: Math.round(similarity * 100) / 100,
-            analysis: analysis.join(". ") + ".",
+            match,
             distance,
-            featureMatchScore
+            confidence: Math.round(confidence * 100) / 100,
+            analysis: analysis.join(". ") + "."
         };
     } catch (error) {
         console.error('Error in analyzeSimilarity:', error);
         throw error;
-    }
-}
-
-function compareFeaturePoints(points1, points2) {
-    try {
-        const distances = points1.map((p1, i) => {
-            const p2 = points2[i];
-            return 1 - Math.min(
-                faceapi.euclideanDistance([p1.x, p1.y], [p2.x, p2.y]) / 100,
-                1
-            );
-        });
-        
-        return distances.reduce((sum, d) => sum + d, 0) / distances.length;
-    } catch (error) {
-        console.error('Error comparing feature points:', error);
-        return 0;
     }
 }
 
@@ -353,14 +264,10 @@ app.post('/api/match-faces', upload.fields([
         const photoResult = await detectFaceAndExtract(actualImagePath, false);
 
         console.log('Analyzing similarity...');
-        const { similarity, analysis, featureMatchScore } = analyzeSimilarity(
+        const { match, confidence, analysis, distance } = analyzeSimilarity(
             idCardResult.detection,
             photoResult.detection
         );
-        
-        // Keep threshold at 65% but use better matching
-        const threshold = 50;
-        const match = similarity >= threshold;
 
         const baseUrl = `http://localhost:${port}/uploads`;
         const idCardFaceUrl = `${baseUrl}/${idCardResult.extractedFilePath}`;
@@ -368,11 +275,10 @@ app.post('/api/match-faces', upload.fields([
 
         res.json({
             match,
-            confidence: similarity,
+            confidence,
+            distance: Math.round(distance * 1000) / 1000,
             analysis,
-            featureMatchScore: Math.round(featureMatchScore * 100),
             message: match ? 'Faces match' : 'Faces do not match',
-            threshold,
             idCardFace: {
                 url: idCardFaceUrl,
                 box: idCardResult.box

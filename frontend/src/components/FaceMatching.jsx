@@ -59,36 +59,12 @@ const FaceMatching = () => {
         }
     };
 
-    const getConfidenceColor = (confidence) => {
-        if (confidence >= 80) return '#28a745'; // Green for high confidence
-        if (confidence >= 50) return '#ffc107'; // Yellow for medium confidence
-        if (confidence >= 35) return '#fd7e14'; // Orange for borderline
-        return '#dc3545'; // Red for low confidence
-    };
-
-    const renderImageWithBox = (imageFile, box) => {
-        if (!imageFile || !box) return null;
-
-        return (
-            <div className="image-with-box" style={{ position: 'relative', display: 'inline-block' }}>
-                <img
-                    src={URL.createObjectURL(imageFile)}
-                    alt="Original"
-                    style={{ maxWidth: '100%', height: 'auto' }}
-                />
-                <div
-                    style={{
-                        position: 'absolute',
-                        left: `${(box.x / imageFile.width) * 100}%`,
-                        top: `${(box.y / imageFile.height) * 100}%`,
-                        width: `${(box.width / imageFile.width) * 100}%`,
-                        height: `${(box.height / imageFile.height) * 100}%`,
-                        border: '2px solid #00ff00',
-                        boxSizing: 'border-box'
-                    }}
-                />
-            </div>
-        );
+    const getConfidenceColor = (confidence, distance) => {
+        // Use distance for color coding (lower distance is better)
+        if (distance < 0.4) return '#28a745'; // Green for very high confidence
+        if (distance < 0.5) return '#ffc107'; // Yellow for high confidence
+        if (distance < 0.6) return '#fd7e14'; // Orange for possible match
+        return '#dc3545'; // Red for no match
     };
 
     return (
@@ -180,7 +156,11 @@ const FaceMatching = () => {
                             {result.idCardFace && (
                                 <>
                                     <div className="original-image">
-                                        {renderImageWithBox(expectedImage, result.idCardFace.box)}
+                                        <img
+                                            src={URL.createObjectURL(expectedImage)}
+                                            alt="Original ID"
+                                            style={{ maxWidth: '100%', height: 'auto' }}
+                                        />
                                     </div>
                                     <div className="extracted-face">
                                         <img src={result.idCardFace.url} alt="Extracted ID Card Face" />
@@ -194,7 +174,11 @@ const FaceMatching = () => {
                             {result.photoFace && (
                                 <>
                                     <div className="original-image">
-                                        {renderImageWithBox(actualImage, result.photoFace.box)}
+                                        <img
+                                            src={URL.createObjectURL(actualImage)}
+                                            alt="Original Photo"
+                                            style={{ maxWidth: '100%', height: 'auto' }}
+                                        />
                                     </div>
                                     <div className="extracted-face">
                                         <img src={result.photoFace.url} alt="Extracted Photo Face" />
@@ -210,20 +194,26 @@ const FaceMatching = () => {
                                 className="confidence-bar"
                                 style={{
                                     width: `${result.confidence}%`,
-                                    backgroundColor: getConfidenceColor(result.confidence)
+                                    backgroundColor: getConfidenceColor(result.confidence, result.distance)
                                 }}
                             />
                         </div>
-                        <p className="confidence-text">
-                            Match Confidence: {result.confidence.toFixed(1)}%
-                        </p>
+                        <div className="metrics">
+                            <p className="confidence-text">
+                                Match Confidence: {result.confidence.toFixed(1)}%
+                            </p>
+                            <p className="distance-text">
+                                Face Distance: {result.distance.toFixed(3)}
+                                {result.distance < 0.4 && " (Very High Confidence Match)"}
+                                {result.distance >= 0.4 && result.distance < 0.5 && " (High Confidence Match)"}
+                                {result.distance >= 0.5 && result.distance < 0.6 && " (Possible Match)"}
+                                {result.distance >= 0.6 && " (No Match)"}
+                            </p>
+                        </div>
                         <p className="match-message">{result.message}</p>
                         <div className="analysis-section">
                             <h4>Analysis Details</h4>
                             <p className="analysis-text">{result.analysis}</p>
-                            <p className="threshold-info">
-                                Required confidence for match: {result.threshold}%
-                            </p>
                         </div>
                     </div>
                 </div>
