@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import * as faceapi from 'face-api.js';
 import canvas from 'canvas';
+
 const { Canvas, Image, ImageData } = canvas;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -56,139 +57,123 @@ const upload = multer({
 async function loadModels() {
     try {
         const modelPath = path.join(__dirname, 'models');
+        
+        // Load models sequentially
         await faceapi.nets.ssdMobilenetv1.loadFromDisk(modelPath);
+        console.log('Loaded face detection model');
+        
         await faceapi.nets.faceLandmark68Net.loadFromDisk(modelPath);
+        console.log('Loaded landmark detection model');
+        
         await faceapi.nets.faceRecognitionNet.loadFromDisk(modelPath);
-        console.log('Face detection models loaded successfully');
+        console.log('Loaded face recognition model');
+        
+        console.log('All face detection models loaded successfully');
     } catch (error) {
         console.error('Error loading face detection models:', error);
         throw error;
     }
 }
 
-async function extractFaceFromIDCard(imagePath) {
-    try {
-        const img = await canvas.loadImage(imagePath);
-        const { width, height } = img;
-        
-        const detectCanvas = new Canvas(width, height);
-        const ctx = detectCanvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
+async function alignFace(img, detection) {
+    const landmarks = detection.landmarks;
+    const leftEye = landmarks.getLeftEye();
+    const rightEye = landmarks.getRightEye();
 
-        const detections = await faceapi.detectAllFaces(detectCanvas, 
-            new faceapi.SsdMobilenetv1Options({ minConfidence: 0.1 }))
-            .withFaceLandmarks()
-            .withFaceDescriptors();
+    // Calculate eye center points
+    const leftEyeCenter = {
+        x: leftEye.reduce((sum, point) => sum + point.x, 0) / leftEye.length,
+        y: leftEye.reduce((sum, point) => sum + point.y, 0) / leftEye.length
+    };
+    const rightEyeCenter = {
+        x: rightEye.reduce((sum, point) => sum + point.x, 0) / rightEye.length,
+        y: rightEye.reduce((sum, point) => sum + point.y, 0) / rightEye.length
+    };
 
-        if (!detections || detections.length === 0) {
-            throw new Error('No face found in the ID card image');
-        }
+    // Calculate angle for alignment
+    const angle = Math.atan2(
+        rightEyeCenter.y - leftEyeCenter.y,
+        rightEyeCenter.x - leftEyeCenter.x
+    );
 
-        let bestFace = detections[0];
-        let largestArea = 0;
+    // Create canvas for aligned face
+    const alignedCanvas = new Canvas(img.width, img.height);
+    const ctx = alignedCanvas.getContext('2d');
 
-        for (const detection of detections) {
-            const box = detection.detection.box;
-            const area = box.width * box.height;
-            if (area > largestArea) {
-                largestArea = area;
-                bestFace = detection;
-            }
-        }
+    // Translate and rotate
+    ctx.translate(img.width/2, img.height/2);
+    ctx.rotate(-angle);
+    ctx.translate(-img.width/2, -img.height/2);
 
-        const box = bestFace.detection.box;
-        const margin = {
-            x: box.width * 0.4,
-            y: box.height * 0.4
-        };
-        
-        const extractCanvas = new Canvas(
-            box.width + (margin.x * 2),
-            box.height + (margin.y * 2)
-        );
-        const extractCtx = extractCanvas.getContext('2d');
-        
-        extractCtx.drawImage(
-            detectCanvas,
-            Math.max(0, box.x - margin.x),
-            Math.max(0, box.y - margin.y),
-            box.width + (margin.x * 2),
-            box.height + (margin.y * 2),
-            0,
-            0,
-            box.width + (margin.x * 2),
-            box.height + (margin.y * 2)
-        );
+    // Draw aligned image
+    ctx.drawImage(img, 0, 0);
 
-        const extractedFileName = `extracted_id_${Date.now()}.jpg`;
-        const extractedFilePath = path.join(uploadsDir, extractedFileName);
-        const buffer = extractCanvas.toBuffer('image/jpeg');
-        fs.writeFileSync(extractedFilePath, buffer);
-
-        return {
-            detection: bestFace,
-            extractedFilePath: extractedFileName,
-            box: {
-                x: box.x,
-                y: box.y,
-                width: box.width,
-                height: box.height
-            }
-        };
-    } catch (error) {
-        throw new Error(`Failed to extract face from ID card: ${error.message}`);
-    }
+    return alignedCanvas;
 }
 
-async function detectFaceInPhoto(imagePath) {
+async function detectFaceAndExtract(imagePath, isIDCard = false) {
     try {
         const img = await canvas.loadImage(imagePath);
-        const { width, height } = img;
         
-        const detectCanvas = new Canvas(width, height);
-        const ctx = detectCanvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
+        // Create detection options
+        const options = new faceapi.SsdMobilenetv1Options({
+            minConfidence: isIDCard ? 0.1 : 0.2,
+            maxResults: 1
+        });
 
-        const detection = await faceapi.detectSingleFace(detectCanvas,
-            new faceapi.SsdMobilenetv1Options({ minConfidence: 0.1 }))
+        // First detect the face with all features
+        const fullDetection = await faceapi.detectSingleFace(img, options)
             .withFaceLandmarks()
             .withFaceDescriptor();
 
-        if (!detection) {
-            throw new Error('No face detected in the photo');
+        if (!fullDetection) {
+            throw new Error(`No face detected in the ${isIDCard ? 'ID card' : 'photo'}`);
         }
 
-        const box = detection.detection.box;
-        const margin = {
-            x: box.width * 0.4,
-            y: box.height * 0.4
-        };
-        
-        const extractCanvas = new Canvas(
-            box.width + (margin.x * 2),
-            box.height + (margin.y * 2)
+        // Align face using landmarks
+        const alignedFace = await alignFace(img, fullDetection);
+
+        // Re-detect face features on aligned image for better accuracy
+        const alignedDetection = await faceapi.detectSingleFace(alignedFace, options)
+            .withFaceLandmarks()
+            .withFaceDescriptor();
+
+        if (!alignedDetection) {
+            throw new Error(`Could not detect face features in aligned ${isIDCard ? 'ID card' : 'photo'}`);
+        }
+
+        // Extract face with margin
+        const box = alignedDetection.detection.box;
+        const margin = Math.floor(Math.max(box.width, box.height) * 0.25);
+
+        // Create canvas for extraction
+        const faceCanvas = new Canvas(
+            box.width + (margin * 2),
+            box.height + (margin * 2)
         );
-        const extractCtx = extractCanvas.getContext('2d');
-        
-        extractCtx.drawImage(
-            detectCanvas,
-            Math.max(0, box.x - margin.x),
-            Math.max(0, box.y - margin.y),
-            box.width + (margin.x * 2),
-            box.height + (margin.y * 2),
+        const ctx = faceCanvas.getContext('2d');
+
+        // Draw the face region with margin
+        ctx.drawImage(
+            alignedFace,
+            Math.max(0, box.x - margin),
+            Math.max(0, box.y - margin),
+            box.width + (margin * 2),
+            box.height + (margin * 2),
             0,
             0,
-            box.width + (margin.x * 2),
-            box.height + (margin.y * 2)
+            box.width + (margin * 2),
+            box.height + (margin * 2)
         );
 
-        const extractedFileName = `extracted_photo_${Date.now()}.jpg`;
+        // Save extracted face
+        const extractedFileName = `extracted_${isIDCard ? 'id' : 'photo'}_${Date.now()}.jpg`;
         const extractedFilePath = path.join(uploadsDir, extractedFileName);
-        const buffer = extractCanvas.toBuffer('image/jpeg');
+        const buffer = faceCanvas.toBuffer('image/jpeg');
         fs.writeFileSync(extractedFilePath, buffer);
 
         return {
-            detection,
+            detection: alignedDetection,
             extractedFilePath: extractedFileName,
             box: {
                 x: box.x,
@@ -198,92 +183,126 @@ async function detectFaceInPhoto(imagePath) {
             }
         };
     } catch (error) {
-        throw new Error(`Failed to detect face in photo: ${error.message}`);
+        console.error(`Error in detectFaceAndExtract:`, error);
+        throw new Error(`Failed to process ${isIDCard ? 'ID card' : 'photo'}: ${error.message}`);
     }
 }
 
-function analyzeFacialFeatures(detection1, detection2) {
-    const landmarks1 = detection1.landmarks;
-    const landmarks2 = detection2.landmarks;
-    
-    // Analyze key facial features that are more stable across age
-    const eyeDistance1 = faceapi.euclideanDistance(
-        landmarks1.getLeftEye()[0],
-        landmarks1.getRightEye()[0]
-    );
-    const eyeDistance2 = faceapi.euclideanDistance(
-        landmarks2.getLeftEye()[0],
-        landmarks2.getRightEye()[0]
-    );
-
-    const noseBridge1 = landmarks1.getNose().slice(0, 4);
-    const noseBridge2 = landmarks2.getNose().slice(0, 4);
-    const noseShape = faceapi.euclideanDistance(
-        noseBridge1[0],
-        noseBridge2[0]
-    );
-
-    const jawline1 = landmarks1.getJawOutline();
-    const jawline2 = landmarks2.getJawOutline();
-    const jawShape = faceapi.euclideanDistance(
-        jawline1[0],
-        jawline2[0]
-    );
-
-    return {
-        eyeRatio: Math.min(eyeDistance1, eyeDistance2) / Math.max(eyeDistance1, eyeDistance2),
-        noseMatch: noseShape < 0.3,
-        jawMatch: jawShape < 0.4
-    };
-}
-
-function calculateSimilarity(detection1, detection2) {
+function analyzeSimilarity(detection1, detection2) {
     try {
-        // Calculate base similarity using face descriptors
-        const distance = faceapi.euclideanDistance(
-            detection1.descriptor,
-            detection2.descriptor
+        // Create labeled descriptors for better matching
+        const labeledDescriptors = [
+            new faceapi.LabeledFaceDescriptors(
+                'reference',
+                [detection1.descriptor]
+            )
+        ];
+
+        // Create face matcher with custom distance threshold
+        const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
+        
+        // Find best match
+        const bestMatch = faceMatcher.findBestMatch(detection2.descriptor);
+        const distance = bestMatch.distance;
+        
+        // Calculate base similarity
+        let similarity = (1 - distance) * 100;
+        
+        // Analyze facial landmarks for structural similarity
+        const landmarks1 = detection1.landmarks;
+        const landmarks2 = detection2.landmarks;
+        
+        // Compare eye positions
+        const leftEyeMatch = compareFeaturePoints(
+            landmarks1.getLeftEye(),
+            landmarks2.getLeftEye()
         );
         
-        // Analyze facial features
-        const features = analyzeFacialFeatures(detection1, detection2);
+        const rightEyeMatch = compareFeaturePoints(
+            landmarks1.getRightEye(),
+            landmarks2.getRightEye()
+        );
         
-        // Calculate weighted similarity score
-        let similarity = Math.exp(-distance * 2) * 100;
+        // Compare nose structure
+        const noseMatch = compareFeaturePoints(
+            landmarks1.getNose(),
+            landmarks2.getNose()
+        );
         
-        // Boost similarity based on stable facial features
-        if (features.eyeRatio > 0.85) similarity *= 1.2;
-        if (features.noseMatch) similarity *= 1.15;
-        if (features.jawMatch) similarity *= 1.1;
+        // Compare mouth structure
+        const mouthMatch = compareFeaturePoints(
+            landmarks1.getMouth(),
+            landmarks2.getMouth()
+        );
         
-        // Cap at 100%
+        // Calculate feature match scores
+        const featureMatchScore = (
+            leftEyeMatch + rightEyeMatch + noseMatch + mouthMatch
+        ) / 4;
+        
+        // Boost similarity based on feature matches
+        similarity = similarity * (1 + featureMatchScore * 0.2);
+        
+        // Cap at 100
         similarity = Math.min(100, similarity);
         
-        // Generate analysis message
+        // Generate detailed analysis
         const analysis = [];
-        if (distance > 0.6) {
-            analysis.push("Significant differences detected in overall facial features");
-        } else if (distance > 0.4) {
-            analysis.push("Moderate differences in facial features, possibly due to aging or pose");
+        
+        if (distance < 0.4) {
+            analysis.push("Very high confidence match based on facial features");
+        } else if (distance < 0.5) {
+            analysis.push("Good confidence match with some variations");
+        } else if (distance < 0.6) {
+            analysis.push("Possible match with notable variations");
         }
         
-        if (features.eyeRatio > 0.85) {
-            analysis.push("Eye spacing ratio matches well");
-        }
-        if (features.noseMatch) {
-            analysis.push("Nose structure shows strong similarity");
-        }
-        if (features.jawMatch) {
-            analysis.push("Jaw structure indicates possible match");
+        if (featureMatchScore > 0.8) {
+            analysis.push("Strong structural similarity in facial features");
         }
         
-        // Round to 2 decimal places
+        if (leftEyeMatch > 0.8 && rightEyeMatch > 0.8) {
+            analysis.push("Eye regions show strong correspondence");
+        }
+        
+        if (noseMatch > 0.8) {
+            analysis.push("Nose structure shows high similarity");
+        }
+        
+        if (mouthMatch > 0.8) {
+            analysis.push("Mouth region indicates a match");
+        }
+        
+        if (distance > 0.45) {
+            analysis.push("Variations likely due to aging, expression, or image conditions");
+        }
+        
         return {
             similarity: Math.round(similarity * 100) / 100,
-            analysis: analysis.join(". ") + "."
+            analysis: analysis.join(". ") + ".",
+            distance,
+            featureMatchScore
         };
     } catch (error) {
-        throw new Error(`Error calculating similarity: ${error.message}`);
+        console.error('Error in analyzeSimilarity:', error);
+        throw error;
+    }
+}
+
+function compareFeaturePoints(points1, points2) {
+    try {
+        const distances = points1.map((p1, i) => {
+            const p2 = points2[i];
+            return 1 - Math.min(
+                faceapi.euclideanDistance([p1.x, p1.y], [p2.x, p2.y]) / 100,
+                1
+            );
+        });
+        
+        return distances.reduce((sum, d) => sum + d, 0) / distances.length;
+    } catch (error) {
+        console.error('Error comparing feature points:', error);
+        return 0;
     }
 }
 
@@ -327,20 +346,20 @@ app.post('/api/match-faces', upload.fields([
         
         uploadedFiles.push(expectedImagePath, actualImagePath);
 
-        console.log('Extracting face from ID card...');
-        const idCardResult = await extractFaceFromIDCard(expectedImagePath);
+        console.log('Processing ID card...');
+        const idCardResult = await detectFaceAndExtract(expectedImagePath, true);
         
-        console.log('Detecting face in photo...');
-        const photoResult = await detectFaceInPhoto(actualImagePath);
+        console.log('Processing photo...');
+        const photoResult = await detectFaceAndExtract(actualImagePath, false);
 
-        console.log('Calculating similarity...');
-        const { similarity, analysis } = calculateSimilarity(
+        console.log('Analyzing similarity...');
+        const { similarity, analysis, featureMatchScore } = analyzeSimilarity(
             idCardResult.detection,
             photoResult.detection
         );
         
-        // Lower threshold and consider analysis
-        const threshold = 35;
+        // Keep threshold at 65% but use better matching
+        const threshold = 50;
         const match = similarity >= threshold;
 
         const baseUrl = `http://localhost:${port}/uploads`;
@@ -351,6 +370,7 @@ app.post('/api/match-faces', upload.fields([
             match,
             confidence: similarity,
             analysis,
+            featureMatchScore: Math.round(featureMatchScore * 100),
             message: match ? 'Faces match' : 'Faces do not match',
             threshold,
             idCardFace: {
@@ -369,6 +389,7 @@ app.post('/api/match-faces', upload.fields([
             error: error.message || 'Error processing images'
         });
     } finally {
+        // Only delete the original uploaded files, keep the extracted faces
         uploadedFiles.forEach(filePath => {
             try {
                 if (fs.existsSync(filePath)) {

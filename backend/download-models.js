@@ -15,14 +15,21 @@ if (!fs.existsSync(MODELS_DIR)) {
 }
 
 const MODELS_URLS = [
+    // SSD Mobilenet v1 model
     'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/ssd_mobilenetv1_model-weights_manifest.json',
     'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/ssd_mobilenetv1_model-shard1',
     'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/ssd_mobilenetv1_model-shard2',
+    
+    // Face Landmark Model
     'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_landmark_68_model-weights_manifest.json',
     'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_landmark_68_model-shard1',
+    
+    // Face Recognition Model
     'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_recognition_model-weights_manifest.json',
     'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_recognition_model-shard1',
     'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_recognition_model-shard2',
+    
+    // Tiny Face Detector Model
     'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/tiny_face_detector_model-weights_manifest.json',
     'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/tiny_face_detector_model-shard1'
 ];
@@ -56,6 +63,11 @@ async function downloadModels() {
     for (const url of MODELS_URLS) {
         const fileName = path.basename(url);
         const destPath = path.join(MODELS_DIR, fileName);
+        
+        if (fs.existsSync(destPath)) {
+            console.log(`${fileName} already exists, skipping...`);
+            continue;
+        }
         
         console.log(`Downloading ${fileName}...`);
         await downloadFile(url, destPath);
