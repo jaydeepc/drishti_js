@@ -31,7 +31,6 @@ const FaceMatching = () => {
             }
 
             try {
-                // Convert image to base64
                 const base64Image = await convertToBase64(file);
                 
                 if (type === 'expected') {
@@ -83,12 +82,11 @@ const FaceMatching = () => {
         }
     };
 
-    const getConfidenceColor = (confidence, distance) => {
-        // Use distance for color coding (lower distance is better)
-        if (distance < 0.4) return '#28a745'; // Green for very high confidence
-        if (distance < 0.5) return '#ffc107'; // Yellow for high confidence
-        if (distance < 0.6) return '#fd7e14'; // Orange for possible match
-        return '#dc3545'; // Red for no match
+    const getMatchStatus = (distance) => {
+        if (distance < 0.4) return { color: '#28a745', text: 'Very High Confidence Match' };
+        if (distance < 0.5) return { color: '#ffc107', text: 'High Confidence Match' };
+        if (distance < 0.6) return { color: '#fd7e14', text: 'Possible Match' };
+        return { color: '#dc3545', text: 'No Match' };
     };
 
     return (
@@ -213,28 +211,21 @@ const FaceMatching = () => {
                     </div>
 
                     <div className="result-content">
-                        <div className="confidence-meter">
-                            <div 
-                                className="confidence-bar"
-                                style={{
-                                    width: `${result.confidence}%`,
-                                    backgroundColor: getConfidenceColor(result.confidence, result.distance)
-                                }}
-                            />
-                        </div>
-                        <div className="metrics">
-                            <p className="confidence-text">
-                                Match Confidence: {result.confidence.toFixed(1)}%
-                            </p>
-                            <p className="distance-text">
-                                Face Distance: {result.distance.toFixed(3)}
-                                {result.distance < 0.4 && " (Very High Confidence Match)"}
-                                {result.distance >= 0.4 && result.distance < 0.5 && " (High Confidence Match)"}
-                                {result.distance >= 0.5 && result.distance < 0.6 && " (Possible Match)"}
-                                {result.distance >= 0.6 && " (No Match)"}
-                            </p>
-                        </div>
-                        <p className="match-message">{result.message}</p>
+                        {result.distance !== undefined && (
+                            <div className="match-status" style={{
+                                backgroundColor: getMatchStatus(result.distance).color,
+                                color: 'white',
+                                padding: '15px',
+                                borderRadius: '8px',
+                                textAlign: 'center',
+                                marginBottom: '20px',
+                                fontSize: '1.2em',
+                                fontWeight: 'bold'
+                            }}>
+                                {getMatchStatus(result.distance).text}
+                            </div>
+                        )}
+                        
                         <div className="analysis-section">
                             <h4>Analysis Details</h4>
                             <p className="analysis-text">{result.analysis}</p>
