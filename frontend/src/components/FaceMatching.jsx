@@ -8,7 +8,16 @@ const FaceMatching = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
-    const handleImageChange = (e, type) => {
+    const convertToBase64 = (file) => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = (error) => reject(error);
+        });
+    };
+
+    const handleImageChange = async (e, type) => {
         const file = e.target.files[0];
         if (file) {
             if (!file.type.startsWith('image/')) {
@@ -21,12 +30,28 @@ const FaceMatching = () => {
                 return;
             }
 
-            if (type === 'expected') {
-                setExpectedImage(file);
-            } else {
-                setActualImage(file);
+            try {
+                // Convert image to base64
+                const base64Image = await convertToBase64(file);
+                
+                if (type === 'expected') {
+                    setExpectedImage({
+                        file,
+                        base64: base64Image,
+                        preview: URL.createObjectURL(file)
+                    });
+                } else {
+                    setActualImage({
+                        file,
+                        base64: base64Image,
+                        preview: URL.createObjectURL(file)
+                    });
+                }
+                setError(null);
+            } catch (err) {
+                setError('Error processing image');
+                console.error('Error converting image to base64:', err);
             }
-            setError(null);
         }
     };
 
@@ -41,14 +66,13 @@ const FaceMatching = () => {
         setError(null);
         setResult(null);
 
-        const formData = new FormData();
-        formData.append('expectedImage', expectedImage);
-        formData.append('actualImage', actualImage);
-
         try {
-            const response = await axios.post('http://localhost:3001/api/match-faces', formData, {
+            const response = await axios.post('http://localhost:3001/api/match-faces', {
+                expectedImage: expectedImage.base64,
+                actualImage: actualImage.base64
+            }, {
                 headers: {
-                    'Content-Type': 'multipart/form-data',
+                    'Content-Type': 'application/json',
                 }
             });
             setResult(response.data);
@@ -92,7 +116,7 @@ const FaceMatching = () => {
                         {expectedImage && (
                             <div className="preview-container">
                                 <img
-                                    src={URL.createObjectURL(expectedImage)}
+                                    src={expectedImage.preview}
                                     alt="Reference"
                                     className="preview"
                                 />
@@ -119,7 +143,7 @@ const FaceMatching = () => {
                         {actualImage && (
                             <div className="preview-container">
                                 <img
-                                    src={URL.createObjectURL(actualImage)}
+                                    src={actualImage.preview}
                                     alt="Current"
                                     className="preview"
                                 />
@@ -157,7 +181,7 @@ const FaceMatching = () => {
                                 <>
                                     <div className="original-image">
                                         <img
-                                            src={URL.createObjectURL(expectedImage)}
+                                            src={expectedImage.preview}
                                             alt="Original ID"
                                             style={{ maxWidth: '100%', height: 'auto' }}
                                         />
@@ -175,7 +199,7 @@ const FaceMatching = () => {
                                 <>
                                     <div className="original-image">
                                         <img
-                                            src={URL.createObjectURL(actualImage)}
+                                            src={actualImage.preview}
                                             alt="Original Photo"
                                             style={{ maxWidth: '100%', height: 'auto' }}
                                         />

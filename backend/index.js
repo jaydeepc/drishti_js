@@ -22,37 +22,21 @@ const port = 3001;
 // Enable CORS
 app.use(cors());
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
+// Function to decode base64 image
+function decodeBase64Image(dataString) {
+    const matches = dataString.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+    if (matches.length !== 3) {
+        throw new Error('Invalid base64 string');
+    }
+
+    const type = matches[1];
+    const buffer = Buffer.from(matches[2], 'base64');
+
+    return {
+        type,
+        buffer
+    };
 }
-
-// Configure multer for handling file uploads
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, uploadsDir);
-    },
-    filename: function (req, file, cb) {
-        cb(null, Date.now() + path.extname(file.originalname));
-    }
-});
-
-const fileFilter = (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
-        cb(null, true);
-    } else {
-        cb(new Error('Only image files are allowed!'), false);
-    }
-};
-
-const upload = multer({ 
-    storage: storage,
-    fileFilter: fileFilter,
-    limits: {
-        fileSize: 5 * 1024 * 1024
-    }
-});
 
 async function loadModels() {
     try {
@@ -75,9 +59,17 @@ async function loadModels() {
     }
 }
 
-async function detectFaceAndExtract(imagePath, isIDCard = false) {
+async function detectFaceAndExtract(imageData, isIDCard = false) {
     try {
-        const img = await canvas.loadImage(imagePath);
+        // Decode base64 image
+        const decodedImage = decodeBase64Image(imageData);
+        
+        // Save temporary file
+        const tempFilePath = path.join(__dirname, 'uploads', `temp_${Date.now()}.jpg`);
+        fs.writeFileSync(tempFilePath, decodedImage.buffer);
+        
+        // Load image using canvas
+        const img = await canvas.loadImage(tempFilePath);
         
         // Create detection options
         const options = new faceapi.SsdMobilenetv1Options({
@@ -85,12 +77,13 @@ async function detectFaceAndExtract(imagePath, isIDCard = false) {
             maxResults: 1
         });
 
-        // First detect the face with all features
+        // Detect face with all features
         const fullDetection = await faceapi.detectSingleFace(img, options)
             .withFaceLandmarks()
             .withFaceDescriptor();
 
         if (!fullDetection) {
+            fs.unlinkSync(tempFilePath);
             throw new Error(`No face detected in the ${isIDCard ? 'ID card' : 'photo'}`);
         }
 
@@ -120,9 +113,12 @@ async function detectFaceAndExtract(imagePath, isIDCard = false) {
 
         // Save extracted face
         const extractedFileName = `extracted_${isIDCard ? 'id' : 'photo'}_${Date.now()}.jpg`;
-        const extractedFilePath = path.join(uploadsDir, extractedFileName);
+        const extractedFilePath = path.join(__dirname, 'uploads', extractedFileName);
         const buffer = faceCanvas.toBuffer('image/jpeg');
         fs.writeFileSync(extractedFilePath, buffer);
+
+        // Clean up temporary file
+        fs.unlinkSync(tempFilePath);
 
         return {
             detection: fullDetection,
@@ -148,11 +144,6 @@ function analyzeSimilarity(detection1, detection2) {
             detection2.descriptor
         );
 
-        // In face-api.js:
-        // - distance < 0.4: Very high confidence match
-        // - distance < 0.5: High confidence match
-        // - distance < 0.6: Possible match
-        
         // Convert distance to confidence percentage (for UI purposes)
         const confidence = Math.max(0, Math.min(100, (1 - distance) * 100));
         
@@ -230,7 +221,7 @@ async function startServer() {
 }
 
 // Serve uploaded files statically
-app.use('/uploads', express.static(uploadsDir));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use((err, req, res, next) => {
     if (err instanceof multer.MulterError) {
@@ -242,26 +233,19 @@ app.use((err, req, res, next) => {
     next(err);
 });
 
-app.post('/api/match-faces', upload.fields([
-    { name: 'expectedImage', maxCount: 1 },
-    { name: 'actualImage', maxCount: 1 }
-]), async (req, res) => {
-    const uploadedFiles = [];
+app.post('/api/match-faces', express.json({ limit: '10mb' }), async (req, res) => {
     try {
-        if (!req.files || !req.files.expectedImage || !req.files.actualImage) {
+        const { expectedImage, actualImage } = req.body;
+
+        if (!expectedImage || !actualImage) {
             return res.status(400).json({ error: 'Both images are required' });
         }
 
-        const expectedImagePath = req.files.expectedImage[0].path;
-        const actualImagePath = req.files.actualImage[0].path;
-        
-        uploadedFiles.push(expectedImagePath, actualImagePath);
-
         console.log('Processing ID card...');
-        const idCardResult = await detectFaceAndExtract(expectedImagePath, true);
+        const idCardResult = await detectFaceAndExtract(expectedImage, true);
         
         console.log('Processing photo...');
-        const photoResult = await detectFaceAndExtract(actualImagePath, false);
+        const photoResult = await detectFaceAndExtract(actualImage, false);
 
         console.log('Analyzing similarity...');
         const { match, confidence, analysis, distance } = analyzeSimilarity(
@@ -293,17 +277,6 @@ app.post('/api/match-faces', upload.fields([
         console.error('Error processing images:', error);
         res.status(500).json({ 
             error: error.message || 'Error processing images'
-        });
-    } finally {
-        // Only delete the original uploaded files, keep the extracted faces
-        uploadedFiles.forEach(filePath => {
-            try {
-                if (fs.existsSync(filePath)) {
-                    fs.unlinkSync(filePath);
-                }
-            } catch (e) {
-                console.error(`Error deleting file ${filePath}:`, e);
-            }
         });
     }
 });
