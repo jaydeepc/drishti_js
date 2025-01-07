@@ -66,7 +66,7 @@ const FaceMatching = () => {
         setResult(null);
 
         try {
-            const response = await axios.post('http://localhost:3001/api/match-faces', {
+            const response = await axios.post('http://localhost:3002/api/match-faces', {
                 expectedImage: expectedImage.base64,
                 actualImage: actualImage.base64
             }, {
@@ -76,16 +76,16 @@ const FaceMatching = () => {
             });
             setResult(response.data);
         } catch (error) {
-            setError(error.response?.data?.error || 'Error processing images');
+            setError(error.response?.data?.detail || 'Error processing images');
         } finally {
             setLoading(false);
         }
     };
 
-    const getMatchStatus = (distance) => {
-        if (distance < 0.4) return { color: '#28a745', text: 'Very High Confidence Match' };
-        if (distance < 0.5) return { color: '#ffc107', text: 'High Confidence Match' };
-        if (distance < 0.6) return { color: '#fd7e14', text: 'Possible Match' };
+    const getMatchStatus = (confidence) => {
+        if (confidence > 75) return { color: '#28a745', text: 'Very High Confidence Match' };
+        if (confidence > 65) return { color: '#ffc107', text: 'High Confidence Match' };
+        if (confidence > 55) return { color: '#fd7e14', text: 'Possible Match' };
         return { color: '#dc3545', text: 'No Match' };
     };
 
@@ -185,7 +185,10 @@ const FaceMatching = () => {
                                         />
                                     </div>
                                     <div className="extracted-face">
-                                        <img src={result.idCardFace.url} alt="Extracted ID Card Face" />
+                                        <img 
+                                            src={`http://localhost:3002${result.idCardFace.url}`} 
+                                            alt="Extracted ID Card Face" 
+                                        />
                                     </div>
                                 </>
                             )}
@@ -203,7 +206,10 @@ const FaceMatching = () => {
                                         />
                                     </div>
                                     <div className="extracted-face">
-                                        <img src={result.photoFace.url} alt="Extracted Photo Face" />
+                                        <img 
+                                            src={`http://localhost:3002${result.photoFace.url}`} 
+                                            alt="Extracted Photo Face" 
+                                        />
                                     </div>
                                 </>
                             )}
@@ -211,20 +217,21 @@ const FaceMatching = () => {
                     </div>
 
                     <div className="result-content">
-                        {result.distance !== undefined && (
-                            <div className="match-status" style={{
-                                backgroundColor: getMatchStatus(result.distance).color,
-                                color: 'white',
-                                padding: '15px',
-                                borderRadius: '8px',
-                                textAlign: 'center',
-                                marginBottom: '20px',
-                                fontSize: '1.2em',
-                                fontWeight: 'bold'
-                            }}>
-                                {getMatchStatus(result.distance).text}
+                        <div className="match-status" style={{
+                            backgroundColor: getMatchStatus(result.confidence).color,
+                            color: 'white',
+                            padding: '15px',
+                            borderRadius: '8px',
+                            textAlign: 'center',
+                            marginBottom: '20px',
+                            fontSize: '1.2em',
+                            fontWeight: 'bold'
+                        }}>
+                            {getMatchStatus(result.confidence).text}
+                            <div style={{ fontSize: '0.8em', marginTop: '5px' }}>
+                                Confidence: {result.confidence}%
                             </div>
-                        )}
+                        </div>
                         
                         <div className="analysis-section">
                             <h4>Analysis Details</h4>
