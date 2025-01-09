@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import axios from 'axios';
+import './FaceMatching.css';
 
 const FaceMatching = () => {
     const [expectedImage, setExpectedImage] = useState(null);
@@ -75,18 +76,78 @@ const FaceMatching = () => {
                 }
             });
             setResult(response.data);
-        } catch (error) {
-            setError(error.response?.data?.detail || 'Error processing images');
+        } catch (err) {
+            console.error('API Error:', err.response?.data);
+            
+            if (err.response?.data?.detail) {
+                const detail = err.response.data.detail;
+                if (typeof detail === 'object') {
+                    setError(
+                        <div className="error-details">
+                            <div className="error-message">
+                                {detail.error || 'An error occurred during processing'}
+                            </div>
+                            {detail.traceback && (
+                                <div className="error-technical">
+                                    <details>
+                                        <summary>Technical Details</summary>
+                                        <pre>{detail.traceback}</pre>
+                                    </details>
+                                </div>
+                            )}
+                        </div>
+                    );
+                } else {
+                    setError(detail);
+                }
+            } else if (err.response?.status === 413) {
+                setError('Image file size is too large. Please use smaller images.');
+            } else if (err.response?.status === 415) {
+                setError('Unsupported image format. Please use JPEG or PNG images.');
+            } else if (!err.response) {
+                setError('Network error. Please check your connection and try again.');
+            } else {
+                setError('An unexpected error occurred. Please try again.');
+            }
         } finally {
             setLoading(false);
         }
     };
 
     const getMatchStatus = (confidence) => {
-        if (confidence > 75) return { color: '#28a745', text: 'Very High Confidence Match' };
-        if (confidence > 65) return { color: '#ffc107', text: 'High Confidence Match' };
-        if (confidence > 55) return { color: '#fd7e14', text: 'Possible Match' };
-        return { color: '#dc3545', text: 'No Match' };
+        if (confidence > 85) {
+            return { 
+                color: '#28a745',
+                text: 'Very High Confidence Match',
+                message: 'Very strong match with consistent core facial features'
+            };
+        }
+        if (confidence > 70) {
+            return { 
+                color: '#20c997',
+                text: 'High Confidence Match',
+                message: 'High confidence match - facial features align strongly'
+            };
+        }
+        if (confidence > 60) {
+            return { 
+                color: '#ffc107',
+                text: 'Possible Match',
+                message: 'Core facial features show similarity despite differences'
+            };
+        }
+        if (confidence > 40) {
+            return { 
+                color: '#fd7e14',
+                text: 'Low Confidence Match',
+                message: 'Possible match with some variations'
+            };
+        }
+        return { 
+            color: '#dc3545',
+            text: 'No Match',
+            message: 'Significant differences in key facial features'
+        };
     };
 
     return (
@@ -166,7 +227,15 @@ const FaceMatching = () => {
                 </button>
             </form>
 
-            {error && <div className="error">{error}</div>}
+            {error && (
+                <div className="error-container">
+                    {typeof error === 'string' ? (
+                        <div className="error">{error}</div>
+                    ) : (
+                        error
+                    )}
+                </div>
+            )}
             
             {result && (
                 <div className={`result ${result.match ? 'match' : 'no-match'}`}>
@@ -235,7 +304,15 @@ const FaceMatching = () => {
                         
                         <div className="analysis-section">
                             <h4>Analysis Details</h4>
-                            <p className="analysis-text">{result.analysis}</p>
+                            <p className="analysis-text">{getMatchStatus(result.confidence).message}</p>
+                            {result.confidence > 40 && result.confidence <= 70 && (
+                                <p className="analysis-text">
+                                    Differences may be due to age, expression, lighting, or angle.
+                                    {result.confidence > 60 && (
+                                        " Despite variations, underlying facial structure shows consistency."
+                                    )}
+                                </p>
+                            )}
                         </div>
                     </div>
                 </div>
