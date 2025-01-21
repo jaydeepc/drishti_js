@@ -194,17 +194,44 @@ class FaceDetector:
                         face_size = box[2] * box[3]
                         print(f"{prefix}Face size: {face_size} pixels")
                         
+                        # Transform box coordinates based on rotation
+                        height, width = rotated.shape[:2]
+                        transformed_box = {
+                            'x': int(box[0]),
+                            'y': int(box[1]),
+                            'width': int(box[2]),
+                            'height': int(box[3])
+                        }
+                        
+                        # Adjust coordinates based on rotation angle
+                        if angle == 90:
+                            transformed_box = {
+                                'x': height - (box[1] + box[3]),  # height - (y + h)
+                                'y': box[0],                      # x
+                                'width': box[3],                  # h
+                                'height': box[2]                  # w
+                            }
+                        elif angle == 180:
+                            transformed_box = {
+                                'x': width - (box[0] + box[2]),   # width - (x + w)
+                                'y': height - (box[1] + box[3]),  # height - (y + h)
+                                'width': box[2],                  # w
+                                'height': box[3]                  # h
+                            }
+                        elif angle == 270:
+                            transformed_box = {
+                                'x': box[1],                      # y
+                                'y': width - (box[0] + box[2]),   # width - (x + w)
+                                'width': box[3],                  # h
+                                'height': box[2]                  # w
+                            }
+                            
                         results.append({
                             'roi': face_roi.tobytes(),
                             'encoding': features,
                             'angle': float(angle),
                             'size': face_size,
-                            'box': {
-                                'x': int(box[0]),
-                                'y': int(box[1]),
-                                'width': int(box[2]),
-                                'height': int(box[3])
-                            }
+                            'box': transformed_box
                         })
                     except Exception as e:
                         print(f"{prefix}Error processing face: {str(e)}")
@@ -237,28 +264,12 @@ class FaceDetector:
             face_distance = face_recognition.face_distance([encoding1], encoding2)[0]
             
             # Convert distance to similarity score (0-100)
-            # face_distance < 0.6 usually means a match
-            # Adjust sigmoid curve for better separation:
-            # - Move midpoint from 0.5 to 0.45 (lower threshold)
-            # - Increase steepness from 12 to 15
-            # - Add boost for close matches
-            base_similarity = 100 * (1 / (1 + np.exp((face_distance - 0.45) * 15)))
+            # Using sigmoid curve for smooth transition
+            # Midpoint at 0.5 (balanced threshold)
+            # Steepness of 12 for gradual transition
+            similarity = 100 * (1 / (1 + np.exp((face_distance - 0.5) * 12)))
             
-            # Add boost for close matches (face_distance < 0.5)
-            # This will increase scores for similar faces while keeping dissimilar scores low
-            if face_distance < 0.5:
-                # Use quadratic boost for more aggressive scaling
-                boost_factor = (0.5 - face_distance) ** 0.5  # Square root for smoother curve
-                boost = boost_factor * 300  # Increased boost multiplier
-                similarity = min(100, base_similarity + boost)
-                
-                # Additional boost for very close matches
-                if face_distance < 0.35:
-                    similarity = min(100, similarity * 1.2)  # 20% extra boost
-            else:
-                similarity = base_similarity
-            
-            print(f"Face distance: {face_distance:.3f}, Base similarity: {base_similarity:.2f}%, Final similarity: {similarity:.2f}%")
+            print(f"Face distance: {face_distance:.3f}, Similarity: {similarity:.2f}%")
             
             return similarity
             
@@ -302,8 +313,8 @@ def analyze_similarity(similarity: float) -> ComparisonResult:
     Returns:
         Analysis result with match status and description.
     """
-    exact_match_threshold = 55
-    possible_match_threshold = 40
+    exact_match_threshold = 55  # Balanced threshold
+    possible_match_threshold = 40  # Keep same threshold for possible matches
     
     analysis = []
     result = ""
