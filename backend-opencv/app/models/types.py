@@ -1,25 +1,35 @@
-from typing import TypedDict, List, Dict, Optional
+"""Data models and type definitions"""
+from typing import List, Optional
+from typing_extensions import TypedDict
 
-class FaceBox(TypedDict):
+class Box(TypedDict):
     x: int
     y: int
     width: int
     height: int
 
-class FaceMatch(TypedDict):
-    roi: bytes  # Face region image data
-    encoding: Dict  # Face encoding features
-    angle: int  # Rotation angle where face was detected
-    size: int  # Face size in pixels
-    box: FaceBox  # Face bounding box
+class FaceFeatures(TypedDict):
+    encoding: List[float]
 
 class DetectedFace(TypedDict):
-    url: str  # URL to access the face image
-    box: FaceBox  # Face bounding box coordinates
+    roi: bytes
+    encoding: FaceFeatures
+    angle: float
+    size: int
+    box: Box
 
-class MatchResult(TypedDict):
-    match: bool  # Whether faces match
-    confidence: float  # Match confidence score
-    analysis: str  # Detailed analysis text
-    idCardFace: Optional[DetectedFace]  # Detected face in ID card
-    photoFace: Optional[DetectedFace]  # Detected face in photo
+class ComparisonResult(TypedDict):
+    match: bool
+    confidence: float
+    analysis: str
+    result: str
+    referenceFace: dict[str, Box]
+    actualFace: dict[str, Box]
+
+class FaceMatchRequest(TypedDict):
+    referenceImage: str
+    actualImage: str
+
+class ErrorResponse(TypedDict):
+    error: str
+    traceback: Optional[str]

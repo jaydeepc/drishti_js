@@ -1,4 +1,11 @@
 """Data models and type definitions"""
-from .types import FaceBox, FaceMatch, MatchResult
+from .types import Box, FaceFeatures, DetectedFace, ComparisonResult, FaceMatchRequest, ErrorResponse
 
-__all__ = ['FaceBox', 'FaceMatch', 'MatchResult']
+__all__ = [
+    'Box',
+    'FaceFeatures',
+    'DetectedFace',
+    'ComparisonResult',
+    'FaceMatchRequest',
+    'ErrorResponse'
+]

@@ -1,72 +1,132 @@
-from fastapi import APIRouter, HTTPException
+"""Face matching API routes.
+
+This module provides the API endpoints for face matching functionality,
+handling image uploads, face detection, and comparison operations.
+"""
+
+import logging
+from fastapi import APIRouter, HTTPException, status
 from typing import Dict
-from ..utils.image import decode_base64_image, save_face_image
-from ..core.face_detection import (detect_faces_with_rotations,
-                                   compare_face_encodings, analyze_similarity)
+from ..utils.image import decode_base64_image
+from ..core.face_detection import (
+    detect_faces_with_rotations,
+    compare_face_encodings,
+    analyze_similarity,
+    NoFaceDetectedError,
+    FeatureExtractionError
+)
+from ..models.types import FaceMatchRequest, ComparisonResult, ErrorResponse
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-
-@router.post("/match-faces")
-async def match_faces(request_data: dict) -> Dict:
-    """Match faces between ID card and photo"""
+@router.post("/match-faces", response_model=ComparisonResult)
+async def match_faces(request_data: FaceMatchRequest) -> Dict:
+    """Match faces between reference and actual photos.
+    
+    Args:
+        request_data: Dictionary containing base64-encoded images.
+            - referenceImage: Base64 string of reference photo
+            - actualImage: Base64 string of actual photo
+            
+    Returns:
+        Dictionary containing match results:
+            - match: Boolean indicating if faces match
+            - confidence: Similarity score (0-100)
+            - analysis: Detailed analysis text
+            - result: Match status (EXACT_MATCH, POSSIBLE_MATCH, NO_MATCH)
+            - referenceFace: Detected face box in reference image
+            - actualFace: Detected face box in actual image
+            
+    Raises:
+        HTTPException: If image processing or face detection fails
+    """
     try:
-        # Extract base64 images
-        id_image = decode_base64_image(request_data['expectedImage'])
-        photo_image = decode_base64_image(request_data['actualImage'])
+        # Extract and decode base64 images
+        logger.info("Decoding reference image...")
+        reference_image = decode_base64_image(request_data['referenceImage'])
+        if reference_image is None:
+            raise ValueError("Failed to decode reference image")
+            
+        logger.info("Decoding actual image...")
+        actual_image = decode_base64_image(request_data['actualImage'])
+        if actual_image is None:
+            raise ValueError("Failed to decode actual image")
 
-        # Process ID and photo images sequentially to avoid memory issues
-        id_faces = detect_faces_with_rotations(id_image, "ID: ")
-        photo_faces = detect_faces_with_rotations(photo_image, "Photo: ")
+        # Process images sequentially to avoid memory issues
+        logger.info("Processing reference image...")
+        reference_faces = detect_faces_with_rotations(reference_image, "Reference: ")
+        if not reference_faces:
+            raise NoFaceDetectedError("No faces detected in reference image")
+            
+        logger.info("Processing actual image...")
+        actual_faces = detect_faces_with_rotations(actual_image, "Actual: ")
+        if not actual_faces:
+            raise NoFaceDetectedError("No faces detected in actual image")
 
         # Find best matching pair across all rotations
         best_match = None
-        best_id_face = None
+        best_reference_face = None
         best_similarity = 0
 
-        for id_face in id_faces:
-            for photo_face in photo_faces:
-                similarity = compare_face_encodings(id_face['encoding'],
-                                                    photo_face['encoding'])
+        for reference_face in reference_faces:
+            for actual_face in actual_faces:
+                # Compare face encodings
+                similarity = compare_face_encodings(
+                    reference_face['encoding'],
+                    actual_face['encoding']
+                )
                 if similarity > best_similarity:
                     best_similarity = similarity
-                    best_match = photo_face
-                    best_id_face = id_face
+                    best_match = actual_face
+                    best_reference_face = reference_face
 
         if not best_match:
-            raise HTTPException(status_code=400,
-                                detail="No matching face found in the photo")
+            raise NoFaceDetectedError("No matching face found in the photo")
 
-        print(
-            f"Best match found: ID at {best_id_face['angle']}°, Photo at {best_match['angle']}°"
+        logger.info(
+            f"Best match found: Reference at {best_reference_face['angle']}°, "
+            f"Actual at {best_match['angle']}°"
         )
-        print(f"Match confidence: {best_similarity}%")
+        logger.info(f"Match confidence: {best_similarity}%")
 
         # Generate analysis for best match
         comparison_result = analyze_similarity(best_similarity)
+        
+        # Add face box information
+        comparison_result['referenceFace'] = {'box': best_reference_face['box']}
+        comparison_result['actualFace'] = {'box': best_match['box']}
 
-        # Save face images
-        id_face_filename = save_face_image(best_id_face['roi'], 'id')
-        photo_face_filename = save_face_image(best_match['roi'], 'photo')
+        return comparison_result
 
-        return {
-            'match': bool(comparison_result['match']),
-            'confidence': float(comparison_result['confidence']),
-            'analysis': str(comparison_result['analysis']),
-            'idCardFace': {
-                'url': f'/uploads/{id_face_filename}',
-                'box': best_id_face['box']
-            },
-            'photoFace': {
-                'url': f'/uploads/{photo_face_filename}',
-                'box': best_match['box']
-            }
-        }
-
+    except NoFaceDetectedError as e:
+        logger.warning(f"Face detection error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except FeatureExtractionError as e:
+        logger.warning(f"Feature extraction error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning(f"Validation error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         import traceback
-        error_details = {'error': str(e), 'traceback': traceback.format_exc()}
-        print("Error details:", error_details)
-        raise HTTPException(status_code=500, detail=error_details)
+        error_details: ErrorResponse = {
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
+        logger.error("Error details:", extra=error_details)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error_details
+        )
